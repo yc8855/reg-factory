@@ -2,7 +2,7 @@
 
 # 🏭 reg-factory
 
-### Outlook · Gmail · ChatGPT · Grok · Claude · Google One 全自动注册/授权机
+### Outlook · Gmail · ChatGPT · Grok · Claude · Gemini · Google One 全自动注册/授权机
 
 **自动批量注册 Outlook / Gmail 邮箱 → 平台注册 / 订阅授权 → 导出 cookie 或导入 SUB2API / CPA**
 
@@ -16,6 +16,8 @@
   <img src="https://img.shields.io/badge/Grok-000000?style=for-the-badge&logo=x&logoColor=white" alt="Grok" height="34" />
   &nbsp;
   <img src="https://img.shields.io/badge/Claude-D97757?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude" height="34" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/Gemini-886FBF?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini" height="34" />
   &nbsp;
   <img src="https://img.shields.io/badge/Google%20One-4285F4?style=for-the-badge&logo=googleone&logoColor=white" alt="Google One" height="34" />
 </p>
