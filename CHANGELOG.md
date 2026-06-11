@@ -1,5 +1,24 @@
 ﻿# 更新日志
 
+## 2026-06-12 — vision_solver 过 hCaptcha（canvas 点击 + 拖拽）
+
+**新增**
+- **`vision_solver` 新增 `canvas_grid` 模式**：解新版 hCaptcha。实测发现现代 hCaptcha 把**整个挑战渲染进单个 `<canvas>`（500×470）**，无任何可枚举/可点的 DOM tile，原 `grid_select`（点 DOM 元素）不适用。新 driver `solve_canvas_grid`：
+  - **稳定截图**（`_shot_canvas_stable`）：先强制等图加载，再要求连续帧字节一致才采用，避免截到渐入/加载中的半成品。
+  - **像素坐标点击**（`_click_canvas_cell`）：按 bbox/截图尺寸比换算 dpr，直接 `click(position=...)` 点 canvas 对应格中心。
+  - **网格几何**（`overlay_grid_numbers` 四边内缩）：实测 500×470 上内缩 top0.30/bottom0.036/左右0.164，把编号网格框定到真实图块区，保证点中心对齐。
+  - **题型自动判别**（`_infer_layout`）：题干含 "the item/thing"(单数) 且无 "all/each" → 单选（`vote_answer`，只点 1 格、永不空选）；"card/different" → 1×3 卡片单选；"select all" → 多选（`vote_picklist`）。空共识时兜底点最高票一格，避免空提交浪费轮次。
+- **`vision_solver` 新增 `canvas_drag` 模式**：解拖拽类挑战（把 piece 拖到 target）。`solve_canvas_drag` + `vote_points`（各模型给 `FROM=(x,y) TO=(x,y)` 归一化坐标、取各点中位数抗离群）+ `_drag_on_canvas`（`page.mouse` down/move 分步带抖动/up 模拟人手）。预置 `presets/hcaptcha_drag.json`。
+- 预置 `presets/hcaptcha.json` 改写为 `canvas_grid`（`frame_match=["frame=challenge"]`，题干 `#prompt-question`，提交 `.button-submit`）。
+
+**测试**
+- 点击型对 live demo（`https://accounts.hcaptcha.com/demo`）三个测试 sitekey 各跑 3 轮：**8/9 通过**，唯一失败为空选卡死，修复后（单选路由 + 兜底点击）复跑全过。
+- 拖拽型 demo 不发拖拽题（三种探针证实该 demo + 测试 key 只发 "Tap the item provides shade" 一种 3×3 点击题），故用本地合成 canvas 谜题（蓝球拖进红框）验证机制：**3/3 命中**，中位数投票纠正了个别模型偏差。
+
+**说明**
+- 真实 hCaptcha 拖拽/滑块题需 live 复现后再校准坐标系与题型判别；点击型已可用，拖拽机制已验证、链路就绪。
+- 网关/key 复用现有视觉投票池变量（`.env`），代码零明文。`screenshots_vision/` 已入 `.gitignore`。
+
 ## 2026-06-08 — GitHub 注册 + Arkose 验证 agent-captcha 视觉求解
 
 **新增**

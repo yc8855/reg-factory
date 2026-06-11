@@ -43,3 +43,4 @@ claude_node_usage.txt
 gmail_android/offline/bluestacks/*
 !gmail_android/offline/bluestacks/.gitkeep
 gmail_android/dist/
+screenshots_vision/
