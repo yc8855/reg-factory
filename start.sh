@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# 启动 reg-factory 控制面板 (mac/linux)
+cd "$(dirname "$0")"
+
+if [ ! -x ".venv/bin/python" ]; then
+  echo "[错误] 还没安装。请先运行 ./install.sh"
+  exit 1
+fi
+
+echo "启动 reg-factory 控制面板 ..."
+echo "面板地址: http://127.0.0.1:8799"
+echo "Ctrl+C 停止服务。"
+
+# 后台等 2 秒打开浏览器(mac=open / linux=xdg-open)
+( sleep 2; (command -v open >/dev/null && open http://127.0.0.1:8799) || (command -v xdg-open >/dev/null && xdg-open http://127.0.0.1:8799) ) &
+
+.venv/bin/python -m uvicorn webui.server:app --host 127.0.0.1 --port 8799

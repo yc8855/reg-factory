@@ -1,0 +1,313 @@
+# -*- coding: utf-8 -*-
+"""
+webui/scripts.py — GUI 的数据核心：把每个入口脚本的命令行参数、以及 .env 配置项
+结构化成 schema，前端据此自动生成表单。新增脚本/配置项只改这里。
+
+参数类型(type)对应前端控件：
+  bool   -> 勾选框(store_true，勾上才追加 --flag)
+  int    -> 数字输入
+  str    -> 文本输入
+  choice -> 下拉(配 choices)
+  multi  -> 多选(nargs="+"，选中的值空格分隔追加在 --flag 后)
+positional=True 表示位置参数(不带 --，直接拼值)。
+"""
+
+# ============================================================ 入口脚本 schema
+SCRIPTS = [
+    # ---------------------------------------------------------------- 主流程
+    {
+        "id": "run_full_flow",
+        "file": "run_full_flow.py",
+        "category": "主流程",
+        "title": "端到端全流程",
+        "desc": "注册 Outlook 邮箱 → 在所选平台注册账号。最常用入口。",
+        "args": [
+            {"flag": "--platforms", "type": "multi", "choices": ["claude", "chatgpt", "grok"],
+             "default": ["claude"], "help": "要注册的平台(可多选)"},
+            {"flag": "--rounds", "type": "int", "default": 1, "help": "循环注册轮数(0=无限循环)"},
+            {"flag": "--codex", "type": "bool", "default": False, "help": "chatgpt 注册后走 Codex OAuth 导入 SUB2API(会接码过手机)"},
+            {"flag": "--import-c2a", "type": "bool", "default": False, "help": "chatgpt 注册后即时导入 chatgpt2api(需配 CHATGPT2API_*)"},
+            {"flag": "--codex-manual-phone", "type": "bool", "default": False, "help": "Codex add-phone 手动模式(自己在浏览器填号收码)"},
+            {"flag": "--codex-group", "type": "str", "default": "", "help": "SUB2API 目标分组名(默认取配置)"},
+            {"flag": "--skip-email", "type": "bool", "default": False, "help": "跳过邮箱注册，直接用下面指定的邮箱"},
+            {"flag": "--email", "type": "str", "default": "", "help": "配合 --skip-email：现成邮箱"},
+            {"flag": "--password", "type": "str", "default": "", "help": "配合 --email 的密码"},
+            {"flag": "--node", "type": "str", "default": "auto", "help": "claude/grok 走的 Clash 节点"},
+            {"flag": "--email-attempts", "type": "int", "default": 30, "help": "邮箱注册最多尝试次数"},
+            {"flag": "--platform-timeout", "type": "int", "default": 600, "help": "平台注册单号超时(秒)"},
+            {"flag": "--dry-run", "type": "bool", "default": False, "help": "只打印将执行的命令，不真注册(安全预览)"},
+        ],
+    },
+    {
+        "id": "register_three_platforms",
+        "file": "register_three_platforms.py",
+        "category": "主流程",
+        "title": "三平台注册(已有邮箱)",
+        "desc": "用现成邮箱(或从 emails.txt 池)在 Claude/ChatGPT/Grok 注册。",
+        "args": [
+            {"flag": "--from-pool", "type": "bool", "default": False, "help": "从 emails.txt 池取一个邮箱"},
+            {"flag": "--email", "type": "str", "default": "", "help": "指定邮箱(不从池取时)"},
+            {"flag": "--password", "type": "str", "default": "", "help": "邮箱密码"},
+            {"flag": "--token", "type": "str", "default": "", "help": "Outlook refresh_token(走 Graph 取码)"},
+            {"flag": "--client-id", "type": "str", "default": "", "help": "Outlook OAuth client_id"},
+            {"flag": "--platforms", "type": "multi", "choices": ["claude", "chatgpt", "grok"],
+             "default": ["claude", "chatgpt", "grok"], "help": "要注册的平台"},
+            {"flag": "--parallel", "type": "bool", "default": False, "help": "并行跑各平台(默认顺序)"},
+            {"flag": "--loop", "type": "bool", "default": False, "help": "持续从池取号循环注册(常驻)"},
+            {"flag": "--codex", "type": "bool", "default": False, "help": "chatgpt 后走 Codex OAuth"},
+            {"flag": "--import-c2a", "type": "bool", "default": False, "help": "chatgpt 后导入 chatgpt2api"},
+            {"flag": "--node", "type": "str", "default": "auto", "help": "Grok Clash 节点"},
+            {"flag": "--timeout", "type": "int", "default": 600, "help": "单平台超时(秒)"},
+        ],
+    },
+    {
+        "id": "oauth_codex",
+        "file": "oauth_codex.py",
+        "category": "主流程",
+        "title": "Codex OAuth 授权 → SUB2API",
+        "desc": "用已存 cookie 重登 ChatGPT，走 OAuth 拿带 refresh_token 的凭据建到 SUB2API/CPA。默认直接接码过 add-phone。",
+        "args": [
+            {"flag": "--cookie", "type": "str", "default": "", "help": "cookie 文件路径(默认最新 full_*.json)"},
+            {"flag": "--phone-skip", "type": "int", "default": 0, "help": "先赌免手机直连次数(0=直接接码不赌)"},
+            {"flag": "--manual-phone", "type": "bool", "default": False, "help": "手动模式：自己在浏览器填号+输码"},
+            {"flag": "--phone", "type": "str", "default": "", "help": "半自动：脚本填该号(E.164)+选WhatsApp，你只手输码"},
+            {"flag": "--group", "type": "str", "default": "", "help": "SUB2API 目标分组(默认取配置)"},
+            {"flag": "--skip-cpa", "type": "bool", "default": False, "help": "不推 CPA(默认配好就推)"},
+            {"flag": "--keep", "type": "bool", "default": False, "help": "失败保留窗口便于排查"},
+        ],
+    },
+    # ---------------------------------------------------------------- 单平台注册
+    {
+        "id": "register_chatgpt",
+        "file": "register_chatgpt.py",
+        "category": "单平台注册",
+        "title": "ChatGPT 注册",
+        "desc": "ChatGPT 单平台注册(可绕过邮箱池指定邮箱)。",
+        "args": [
+            {"flag": "--count", "type": "int", "default": 1, "help": "注册数量"},
+            {"flag": "--concurrency", "type": "int", "default": 1, "help": "并发数"},
+            {"flag": "--timeout", "type": "int", "default": 480, "help": "单号超时(秒)"},
+            {"flag": "--email", "type": "str", "default": "", "help": "指定邮箱(绕过池)"},
+            {"flag": "--password", "type": "str", "default": "", "help": "邮箱密码"},
+            {"flag": "--refresh-token", "type": "str", "default": "", "help": "Outlook refresh_token"},
+            {"flag": "--client-id", "type": "str", "default": "", "help": "Outlook OAuth client_id"},
+            {"flag": "--import-c2a", "type": "bool", "default": False, "help": "注册后导入 chatgpt2api"},
+            {"flag": "--codex", "type": "bool", "default": False, "help": "注册后走 Codex OAuth"},
+            {"flag": "--codex-manual-phone", "type": "bool", "default": False, "help": "Codex 手动填号收码"},
+            {"flag": "--keep-on-fail", "type": "bool", "default": False, "help": "失败保留窗口"},
+        ],
+    },
+    {
+        "id": "register_grok",
+        "file": "register_grok.py",
+        "category": "单平台注册",
+        "title": "Grok 注册",
+        "desc": "Grok 单平台注册(需能过 Cloudflare 的干净节点)。",
+        "args": [
+            {"flag": "--count", "type": "int", "default": 1, "help": "注册数量"},
+            {"flag": "--concurrency", "type": "int", "default": 1, "help": "并发数"},
+            {"flag": "--timeout", "type": "int", "default": 600, "help": "单号超时(秒)"},
+            {"flag": "--node", "type": "str", "default": "auto", "help": "Clash 出口节点(过 grok CF)"},
+            {"flag": "--email", "type": "str", "default": "", "help": "指定邮箱(绕过池)"},
+            {"flag": "--password", "type": "str", "default": "", "help": "邮箱密码"},
+            {"flag": "--keep-on-fail", "type": "bool", "default": False, "help": "失败保留窗口"},
+        ],
+    },
+    {
+        "id": "register_claude",
+        "file": "register.py",
+        "category": "单平台注册",
+        "title": "Claude 注册",
+        "desc": "Claude 单平台注册(claude.ai 区域封锁需走干净节点)。",
+        "args": [
+            {"flag": "--count", "type": "int", "default": 1, "help": "注册数量"},
+            {"flag": "--concurrency", "type": "int", "default": 1, "help": "并发数"},
+            {"flag": "--timeout", "type": "int", "default": 480, "help": "单号超时(秒)"},
+            {"flag": "--email", "type": "str", "default": "", "help": "指定邮箱(调试)"},
+            {"flag": "--password", "type": "str", "default": "", "help": "邮箱密码"},
+            {"flag": "--token", "type": "str", "default": "", "help": "refresh token"},
+            {"flag": "--node", "type": "str", "default": "none", "help": "Clash 节点(none=不切)"},
+        ],
+    },
+    {
+        "id": "register_github",
+        "file": "register_github.py",
+        "category": "单平台注册",
+        "title": "GitHub 注册",
+        "desc": "GitHub 注册(含 Arkose 验证视觉求解，需配 VISION_*/VOTE_*)。",
+        "args": [
+            {"flag": "--auto", "type": "bool", "default": False, "help": "走完整流程(含取 launch code)"},
+            {"flag": "--email", "type": "str", "default": "", "help": "指定邮箱(默认从 _outlook_pool 取)"},
+            {"flag": "--password", "type": "str", "default": "", "help": "邮箱密码"},
+            {"flag": "--no-keep", "type": "bool", "default": False, "help": "结束后删窗口(默认保留)"},
+            {"flag": "--timeout", "type": "int", "default": 600, "help": "超时(秒)"},
+        ],
+    },
+    # ---------------------------------------------------------------- 养号 / 邮箱
+    {
+        "id": "outlook_reg_loop",
+        "file": "outlook_reg_loop.py",
+        "category": "养号/邮箱",
+        "title": "Outlook 自注册养号",
+        "desc": "持续自注册 Outlook，产出到 _outlook_pool/ 与 emails.txt。count=0 为无限循环。",
+        "args": [
+            {"flag": "--count", "type": "int", "default": 0, "help": "注册数量(0=无限循环)"},
+            {"flag": "--target-pool", "type": "int", "default": 0, "help": "池达到此数量就停(0=不限)"},
+            {"flag": "--max-press", "type": "str", "default": "3", "help": "人机验证按住次数上限"},
+            {"flag": "--timeout", "type": "int", "default": 180, "help": "单号注册超时(秒)"},
+            {"flag": "--sleep", "type": "int", "default": 5, "help": "每次注册间隔(秒)"},
+        ],
+    },
+    {
+        "id": "unlock_outlook",
+        "file": "unlock_outlook.py",
+        "category": "养号/邮箱",
+        "title": "解锁被锁 Outlook",
+        "desc": "批量解锁被锁账号，结果分类输出到 unlock_results/。",
+        "args": [
+            {"flag": "--input", "type": "str", "default": "", "help": "账号文件(每行 email----password；默认找最新 locked)"},
+            {"flag": "--proxy-file", "type": "str", "default": "", "help": "住宅代理池文件"},
+            {"flag": "--concurrency", "type": "int", "default": 1, "help": "并发数"},
+        ],
+    },
+    {
+        "id": "extract_graph_tokens",
+        "file": "extract_graph_tokens.py",
+        "category": "养号/邮箱",
+        "title": "提取 Graph refresh_token",
+        "desc": "用账号密码换 Microsoft Graph refresh_token(免浏览器)，输出到 outlook_accounts/。",
+        "args": [
+            {"flag": "accounts_file", "type": "str", "default": "", "positional": True,
+             "help": "账号文件(每行 email----password----...；留空自动扫 unlock_results/)"},
+            {"flag": "--email", "type": "str", "default": "", "help": "单个邮箱"},
+            {"flag": "--password", "type": "str", "default": "", "help": "单个邮箱密码"},
+            {"flag": "--concurrency", "type": "int", "default": 5, "help": "并发数"},
+        ],
+    },
+    {
+        "id": "mailbox_broker",
+        "file": "mailbox_broker.py",
+        "category": "养号/邮箱",
+        "title": "共享取码服务(常驻)",
+        "desc": "并行流水线时起共享取码服务，避免三窗口并发登录同一邮箱。常驻运行。",
+        "args": [
+            {"flag": "--host", "type": "str", "default": "127.0.0.1", "help": "监听地址"},
+            {"flag": "--port", "type": "int", "default": 8765, "help": "监听端口"},
+            {"flag": "--idle", "type": "int", "default": 480, "help": "空闲会话回收秒数"},
+        ],
+    },
+    # ---------------------------------------------------------------- 导出 / 上传
+    {
+        "id": "upload_tokens",
+        "file": "upload_tokens.py",
+        "category": "导出/上传",
+        "title": "上传标准 token",
+        "desc": "把 tokens/ 下标准 token 上传到 CPA/SUB2API/webchat2api。位置参数：all/chatgpt/grok。",
+        "args": [
+            {"flag": "target", "type": "choice", "choices": ["all", "chatgpt", "grok"],
+             "default": "all", "positional": True, "help": "上传目标"},
+        ],
+    },
+    {
+        "id": "export_chatgpt2api",
+        "file": "export_chatgpt2api.py",
+        "category": "导出/上传",
+        "title": "导出/上传 chatgpt2api",
+        "desc": "聚合普通网页号导入 chatgpt2api(--post 直传 / 默认导出 txt)。",
+        "args": [
+            {"flag": "--post", "type": "str", "default": "", "help": "直接 POST 到的 host(留空只导出文件)"},
+            {"flag": "--key", "type": "str", "default": "", "help": "chatgpt2api admin key(配合 --post)"},
+            {"flag": "--json", "type": "bool", "default": False, "help": "导出 JSON(默认一行一个 access_token)"},
+            {"flag": "--out", "type": "str", "default": "", "help": "输出文件路径"},
+        ],
+    },
+    {
+        "id": "export_accounts",
+        "file": "export_accounts.py",
+        "category": "导出/上传",
+        "title": "导出账号 cookie",
+        "desc": "导出已注册账号 cookie 供直登扩展使用(无参=全部平台)。",
+        "args": [],
+    },
+]
+
+
+# ============================================================ .env 配置 schema
+# group: 分组标题；key: 变量名；required: 是否必填(运行对应功能时)；help: 说明；
+# secret: True 时前端用密码框；default: 模板默认值(仅展示)。
+ENV_SCHEMA = [
+    {"group": "Clash 代理(节点切换/出口)", "items": [
+        {"key": "CLASH_SECRET", "required": True, "secret": True, "help": "Clash Verge 外部控制器 secret(走节点必填)"},
+        {"key": "CLASH_API", "default": "http://127.0.0.1:9097", "help": "Clash 控制面地址"},
+        {"key": "CLASH_PROXY", "default": "http://127.0.0.1:7897", "help": "Clash 混合端口代理"},
+        {"key": "CLASH_GROUP", "default": "GLOBAL", "help": "决定出口的代理组名"},
+    ]},
+    {"group": "BitBrowser", "items": [
+        {"key": "BITBROWSER_API", "default": "http://127.0.0.1:54345", "help": "比特浏览器本地 API"},
+    ]},
+    {"group": "短信接码", "items": [
+        {"key": "SMS_TOKEN", "secret": True, "help": "firefox.fun 接码 token"},
+        {"key": "HERO_SMS_API_KEY", "secret": True, "help": "hero-sms.com 备用接码 key"},
+        {"key": "SMSMAN_TOKEN", "secret": True, "help": "sms-man.com 接码 key(Codex add-phone 主用)"},
+        {"key": "SMSMAN_APP_ID_OPENAI", "default": "openai", "help": "sms-man OpenAI 服务 id(openai 自动解析为 2754)"},
+        {"key": "SMSMAN_COUNTRY_ID_OPENAI", "default": "0", "help": "国家 id(0=随机/按价格)"},
+    ]},
+    {"group": "打码平台(可选)", "items": [
+        {"key": "CAPSOLVER_API_KEY", "secret": True, "help": "CapSolver 打码 key"},
+        {"key": "EZCAPTCHA_API_KEY", "secret": True, "help": "EZ-Captcha 打码 key(解锁 Outlook 用)"},
+        {"key": "YESCAPTCHA_API_KEY", "secret": True, "help": "YesCaptcha key(GitHub Arkose 备用)"},
+    ]},
+    {"group": "Outlook 邮箱来源", "items": [
+        {"key": "OUTLOOK_CARD", "secret": True, "help": "闪客云邮箱卡密(接口取号用)"},
+        {"key": "OUTLOOK_PROXIES", "help": "Outlook 自注册住宅代理池(换行/逗号分隔)"},
+    ]},
+    {"group": "SUB2API(Codex 导入)", "items": [
+        {"key": "SUB2API_URL", "help": "SUB2API 管理接口地址(用 --codex 时必填)"},
+        {"key": "SUB2API_EMAIL", "help": "SUB2API 登录邮箱"},
+        {"key": "SUB2API_PASSWORD", "secret": True, "help": "SUB2API 登录密码"},
+        {"key": "SUB2API_GROUP", "default": "codex", "help": "目标分组名(需后台先建好)"},
+    ]},
+    {"group": "CPA(codex 授权文件导入)", "items": [
+        {"key": "CPA_URL", "help": "CPA 管理接口地址"},
+        {"key": "CPA_MGMT_KEY", "secret": True, "help": "CPA 管理 key"},
+    ]},
+    {"group": "chatgpt2api(普通网页号)", "items": [
+        {"key": "CHATGPT2API_URL", "help": "chatgpt2api host(用 --import-c2a 时必填)"},
+        {"key": "CHATGPT2API_KEY", "secret": True, "help": "chatgpt2api admin key"},
+    ]},
+    {"group": "webchat2api(Grok sso)", "items": [
+        {"key": "WEBCHAT2API_URL", "help": "webchat2api 地址(用 Grok 时)"},
+        {"key": "WEBCHAT2API_KEY", "secret": True, "help": "webchat2api key"},
+    ]},
+    {"group": "Codex add-phone 接码调参", "items": [
+        {"key": "CODEX_PHONE_SKIP_ATTEMPTS", "default": "0", "help": "先赌免手机次数(0=直接接码)"},
+        {"key": "CODEX_ADDPHONE_ATTEMPTS", "default": "2", "help": "接码换号上限次数"},
+        {"key": "CODEX_SMS_TIMEOUT", "default": "150", "help": "单号等码超时(秒)"},
+        {"key": "SMS_COUNTRY_BLACKLIST_OPENAI", "default": "261,63", "help": "拉黑号段(dialing code)"},
+    ]},
+    {"group": "GitHub Arkose 视觉投票(可选)", "items": [
+        {"key": "VISION_API_BASE", "help": "主视觉网关(OpenAI 兼容)"},
+        {"key": "VISION_API_KEY", "secret": True, "help": "主视觉网关 key"},
+        {"key": "VOTE_ZZ_BASE", "help": "投票中转网关(gemini/gpt)"},
+        {"key": "VOTE_ZZ_KEY", "secret": True, "help": "投票网关 gemini key"},
+        {"key": "VOTE_GPT_KEY", "secret": True, "help": "投票网关 gpt key"},
+        {"key": "VOTE_OPUS_BASE", "help": "claude opus 专用网关"},
+        {"key": "VOTE_OPUS_KEY", "secret": True, "help": "opus 网关 key"},
+    ]},
+]
+
+
+def script_by_id(sid):
+    for s in SCRIPTS:
+        if s["id"] == sid:
+            return s
+    return None
+
+
+# 所有 schema 里出现的 .env key（用于读 .env 时补齐未在模板里的项不丢）
+def env_keys():
+    keys = []
+    for g in ENV_SCHEMA:
+        for it in g["items"]:
+            keys.append(it["key"])
+    return keys

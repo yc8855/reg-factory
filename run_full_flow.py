@@ -110,7 +110,7 @@ def stage_email(args, env):
     ]
     log(f"Stage A cmd: {' '.join(cmd)}", "A")
     if args.dry_run:
-        return ("dry-run@outlook.com", "DryRunPass1!")
+        return ("dry-run@outlook.com", "DryRunPass1!", "", "")
 
     proc = subprocess.Popen(
         cmd, cwd=ROOT, env=env,

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reg-factory 控制面板</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🏭 reg-factory <span class="sub">控制面板</span></div>
+  <div class="status" id="status">
+    <span class="dot" id="dot-bb"></span>BitBrowser
+    <span class="dot" id="dot-clash"></span>Clash
+    <span class="node" id="node">节点 --</span>
+    <span class="running" id="running"></span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-section">
+      <button class="navbtn active" data-view="run">▶ 运行任务</button>
+      <button class="navbtn" data-view="env">⚙️ 配置 (.env)</button>
+    </div>
+    <div id="script-nav"></div>
+  </nav>
+
+  <main class="content">
+    <!-- 运行视图 -->
+    <section id="view-run">
+      <div id="form-panel" class="panel">
+        <p class="hint">← 左侧选择一个任务</p>
+      </div>
+      <div class="panel log-panel">
+        <div class="log-head">
+          <span id="log-title">运行日志</span>
+          <button id="btn-stop" class="btn-stop" disabled>停止</button>
+        </div>
+        <pre id="log" class="log"></pre>
+      </div>
+    </section>
+
+    <!-- 配置视图 -->
+    <section id="view-env" style="display:none">
+      <div class="panel">
+        <div class="env-head">
+          <h2>环境配置 (.env)</h2>
+          <button id="btn-save-env" class="btn-run">保存配置</button>
+          <span id="env-msg" class="env-msg"></span>
+        </div>
+        <p class="hint">密钥只保存在本机 .env，不上传。必填项标 <span class="req">*</span>。</p>
+        <div id="env-groups"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
