@@ -45,6 +45,20 @@ async function loadScripts(){
       nav.appendChild(b);
     });
   }
+  // 外部工具链接(新标签打开)
+  try{
+    const links = (await (await fetch('/api/links')).json()).links || [];
+    if(links.length){
+      const t = document.createElement('div');
+      t.className='cat-title'; t.textContent='外部工具'; nav.appendChild(t);
+      links.forEach(l=>{
+        const a=document.createElement('a');
+        a.className='scriptbtn linkbtn'; a.href=l.url; a.target='_blank'; a.rel='noopener';
+        a.title=l.desc||l.url; a.innerHTML=`🔗 ${l.title}`;
+        nav.appendChild(a);
+      });
+    }
+  }catch(e){}
 }
 
 function selectScript(id){
@@ -141,7 +155,12 @@ async function loadEnv(){
   const wrap = $('#env-groups'); wrap.innerHTML='';
   data.groups.forEach(g=>{
     const box = document.createElement('div'); box.className='env-group';
-    box.innerHTML = `<div class="env-group-title">${g.group}</div>`;
+    const tests = (g.tests||[]).map(t=>
+      `<button class="btn-test" data-test="${t.target}">${t.label}</button>`).join('');
+    box.innerHTML = `<div class="env-group-title">
+        <span>${g.group}</span>
+        <span class="test-area">${tests}<span class="test-result" data-result-for="${g.group}"></span></span>
+      </div>`;
     g.items.forEach(it=>{
       const row = document.createElement('div'); row.className='env-item';
       const type = it.secret ? 'password':'text';
@@ -154,8 +173,32 @@ async function loadEnv(){
         </div>`;
       box.appendChild(row);
     });
+    // 绑定该组的测试按钮
+    box.querySelectorAll('.btn-test').forEach(btn=>{
+      btn.onclick = ()=> runTest(btn.dataset.test, btn);
+    });
     wrap.appendChild(box);
   });
+}
+
+// 连通测试：把当前页面所有 .env 输入(含未保存的)一起发过去，用最新值测
+async function runTest(target, btn){
+  const env = {};
+  $$('input[data-env]').forEach(i=>{ if(i.value!=='') env[i.dataset.env]=i.value; });
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '测试中…';
+  const res = btn.closest('.env-group').querySelector('.test-result');
+  res.textContent=''; res.className='test-result';
+  try{
+    const r = await (await fetch(`/api/test/${target}`,{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({env})})).json();
+    res.textContent = (r.ok?'✓ ':'✗ ') + r.msg;
+    res.classList.add(r.ok?'ok':'bad');
+  }catch(e){
+    res.textContent = '✗ 测试请求失败: '+e; res.classList.add('bad');
+  }finally{
+    btn.disabled=false; btn.textContent=old;
+  }
 }
 
 $('#btn-save-env').onclick = async ()=>{

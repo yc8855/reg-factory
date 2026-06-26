@@ -232,20 +232,40 @@ SCRIPTS = [
 ]
 
 
+def script_by_id(sid):
+    for s in SCRIPTS:
+        if s["id"] == sid:
+            return s
+    return None
+
+
+# ============================================================ 外部工具链接
+# 不在本机跑的 web 服务/工具，面板上以"打开链接"卡片呈现(新标签打开)。
+EXTERNAL_LINKS = [
+    {"title": "Gmail 注册", "url": "https://gmails.zeabur.app/gq",
+     "desc": "在线 Gmail 注册服务(外部网页，新标签打开)。"},
+]
+
+
 # ============================================================ .env 配置 schema
 # group: 分组标题；key: 变量名；required: 是否必填(运行对应功能时)；help: 说明；
 # secret: True 时前端用密码框；default: 模板默认值(仅展示)。
 ENV_SCHEMA = [
-    {"group": "Clash 代理(节点切换/出口)", "items": [
-        {"key": "CLASH_SECRET", "required": True, "secret": True, "help": "Clash Verge 外部控制器 secret(走节点必填)"},
-        {"key": "CLASH_API", "default": "http://127.0.0.1:9097", "help": "Clash 控制面地址"},
-        {"key": "CLASH_PROXY", "default": "http://127.0.0.1:7897", "help": "Clash 混合端口代理"},
-        {"key": "CLASH_GROUP", "default": "GLOBAL", "help": "决定出口的代理组名"},
+    {"group": "Clash 代理(节点切换/出口)", "tests": [{"target": "clash", "label": "测试 Clash 连通"}], "items": [
+        {"key": "CLASH_SECRET", "required": True, "secret": True,
+         "help": "Clash Verge → 设置 → 外部控制器(External Controller) 里设的 secret/密钥。"
+                 "若该处留空,这里也留空。设了密钥不填会连不上控制器(节点切换失效)。"},
+        {"key": "CLASH_API", "default": "http://127.0.0.1:9097",
+         "help": "Clash 控制器地址。Clash Verge 默认端口 9097,mihomo 内核默认 9090。在 外部控制器 页可看到。"},
+        {"key": "CLASH_PROXY", "default": "http://127.0.0.1:7897",
+         "help": "Clash 混合代理端口(mixed-port),脚本走它出网。Verge 默认 7897。"},
+        {"key": "CLASH_GROUP", "default": "GLOBAL",
+         "help": "决定出口的代理组名。global 模式下填 GLOBAL;规则模式填你的节点选择组名。"},
     ]},
-    {"group": "BitBrowser", "items": [
+    {"group": "BitBrowser", "tests": [{"target": "bitbrowser", "label": "测试 指纹浏览器连通"}], "items": [
         {"key": "BITBROWSER_API", "default": "http://127.0.0.1:54345", "help": "比特浏览器本地 API"},
     ]},
-    {"group": "短信接码", "items": [
+    {"group": "短信接码", "tests": [{"target": "smsman", "label": "测试 sms-man"}, {"target": "firefox", "label": "测试 firefox.fun"}], "items": [
         {"key": "SMS_TOKEN", "secret": True, "help": "firefox.fun 接码 token"},
         {"key": "HERO_SMS_API_KEY", "secret": True, "help": "hero-sms.com 备用接码 key"},
         {"key": "SMSMAN_TOKEN", "secret": True, "help": "sms-man.com 接码 key(Codex add-phone 主用)"},
@@ -295,13 +315,6 @@ ENV_SCHEMA = [
         {"key": "VOTE_OPUS_KEY", "secret": True, "help": "opus 网关 key"},
     ]},
 ]
-
-
-def script_by_id(sid):
-    for s in SCRIPTS:
-        if s["id"] == sid:
-            return s
-    return None
 
 
 # 所有 schema 里出现的 .env key（用于读 .env 时补齐未在模板里的项不丢）

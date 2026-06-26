@@ -109,10 +109,148 @@ def _write_env_file(path, updates):
     os.replace(tmp, path)
 
 
+# ============================================================ 连通测试
+def _direct_get(url, headers=None, timeout=8):
+    """直连 GET(显式绕过代理——Clash 控制器/BitBrowser 都是 localhost)。
+    返回 (status_code, body_text)。连不上抛异常。"""
+    handler = urllib.request.ProxyHandler({})  # 空 = 不走任何代理
+    opener = urllib.request.build_opener(handler)
+    req = urllib.request.Request(url, headers=headers or {})
+    with opener.open(req, timeout=timeout) as r:
+        return r.status, r.read(8192).decode("utf-8", "replace")
+
+
+def _test_clash():
+    """测 Clash 控制器：GET /version 带 Bearer secret。区分 连不上 / 密码错 / OK。"""
+    api = _read_config_val("CLASH_API", "http://127.0.0.1:9097").rstrip("/")
+    secret = _read_config_val("CLASH_SECRET", "")
+    headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+    try:
+        code, body = _direct_get(api + "/version", headers=headers, timeout=6)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return False, "密码(secret)错误或未设置 —— 检查 CLASH_SECRET"
+        return False, f"控制器返回 HTTP {e.code}"
+    except Exception as e:
+        return False, f"连不上控制器({api})：{str(e)[:60]}。确认 Clash Verge 已开 External Controller"
+    ver = ""
+    try:
+        import json as _j
+        ver = _j.loads(body).get("version", "")
+    except Exception:
+        pass
+    # 顺带报当前节点
+    node = ""
+    try:
+        from common import proxy_switch as ps
+        node = ps.current_node() or ""
+    except Exception:
+        pass
+    return True, f"控制器连通 ✓ 内核版本 {ver}" + (f"，当前节点 {node}" if node else "")
+
+
+def _test_bitbrowser():
+    """测 BitBrowser 本地 API：探健康端点。"""
+    api = _read_config_val("BITBROWSER_API", "http://127.0.0.1:54345").rstrip("/")
+    # BitBrowser 的 /health 返回 200；裸根路径也活
+    for path in ("/health", "/"):
+        try:
+            code, _ = _direct_get(api + path, timeout=5)
+            return True, f"BitBrowser API 连通 ✓ (HTTP {code})"
+        except urllib.error.HTTPError:
+            return True, "BitBrowser API 在线 ✓ (服务响应)"
+        except Exception as e:
+            last = str(e)[:60]
+    return False, f"连不上 BitBrowser({api})：{last}。确认比特浏览器客户端已启动"
+
+
+def _test_smsman():
+    """测 sms-man 接码：GET get-balance 带 token，返回余额=token 有效。"""
+    token = _read_config_val("SMSMAN_TOKEN", "")
+    if not token:
+        return False, "未配置 SMSMAN_TOKEN"
+    base = _read_config_val("SMSMAN_API_BASE", "https://api.sms-man.com/control").rstrip("/")
+    # sms-man 是公网服务，可能要走代理——这里允许走系统代理(用默认 opener)
+    try:
+        req = urllib.request.Request(base + "/get-balance?" + urllib.parse.urlencode({"token": token}))
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read(2048).decode("utf-8", "replace")
+        import json as _j
+        d = _j.loads(body)
+        if isinstance(d, dict) and ("balance" in d or "money" in d):
+            bal = d.get("balance") or d.get("money")
+            return True, f"sms-man 连通 ✓ 余额 {bal}"
+        if isinstance(d, dict) and (d.get("error_code") or d.get("error_msg")):
+            return False, f"sms-man 返回错误：{d.get('error_msg') or d.get('error_code')}（token 可能无效）"
+        return True, f"sms-man 响应：{str(d)[:80]}"
+    except Exception as e:
+        return False, f"sms-man 请求失败：{str(e)[:80]}"
+
+
+def _test_firefox():
+    """测 firefox.fun 接码：用 token 查询(getBalance 类)。"""
+    token = _read_config_val("SMS_TOKEN", "")
+    if not token:
+        return False, "未配置 SMS_TOKEN"
+    base = _read_config_val("SMS_API_BASE", "http://www.firefox.fun/yhapi.ashx")
+    try:
+        req = urllib.request.Request(base + "?" + urllib.parse.urlencode({"act": "getuserinfo", "token": token}))
+        with urllib.request.urlopen(req, timeout=15) as r:
+            body = r.read(1024).decode("utf-8", "replace").strip()
+        # firefox 返回 1|... 表示成功，0|... 表示错误
+        if body.startswith("1"):
+            return True, f"firefox.fun 连通 ✓ {body[:80]}"
+        return False, f"firefox.fun 返回：{body[:80]}（token 可能无效）"
+    except Exception as e:
+        return False, f"firefox.fun 请求失败：{str(e)[:80]}"
+
+
+_TESTERS = {
+    "clash": _test_clash,
+    "bitbrowser": _test_bitbrowser,
+    "smsman": _test_smsman,
+    "firefox": _test_firefox,
+}
+
+
+@app.post("/api/test/{target}")
+async def api_test(target: str, request: Request):
+    # 先把页面上当前(可能未保存的)配置临时写进环境，让测试用最新值
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    overrides = (data or {}).get("env") or {}
+    saved = {}
+    allowed = set(schema.env_keys()) | {"SMSMAN_API_BASE", "SMS_API_BASE"}
+    for k, v in overrides.items():
+        if k in allowed and v not in (None, ""):
+            saved[k] = os.environ.get(k)
+            os.environ[k] = str(v)
+    try:
+        fn = _TESTERS.get(target)
+        if not fn:
+            return JSONResponse({"ok": False, "msg": f"未知测试目标: {target}"}, status_code=400)
+        ok, msg = await asyncio.to_thread(fn)
+        return {"ok": ok, "msg": msg}
+    finally:
+        # 还原临时覆盖(不污染进程环境；真正保存走 /api/env)
+        for k, old in saved.items():
+            if old is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = old
+
+
 # ============================================================ API
 @app.get("/api/scripts")
 def api_scripts():
     return {"scripts": schema.SCRIPTS}
+
+
+@app.get("/api/links")
+def api_links():
+    return {"links": getattr(schema, "EXTERNAL_LINKS", [])}
 
 
 @app.get("/api/status")
@@ -151,7 +289,7 @@ def api_env_get():
                 "help": it.get("help", ""),
                 "default": it.get("default", ""),
             })
-        groups.append({"group": g["group"], "items": items})
+        groups.append({"group": g["group"], "tests": g.get("tests", []), "items": items})
     return {"groups": groups, "env_exists": os.path.isfile(ENV_PATH)}
 
 
