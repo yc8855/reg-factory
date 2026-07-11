@@ -4,7 +4,9 @@ This package drives the Gmail Android signup flow through Appium and a local And
 
 ## Safety Boundary
 
-The script stops at phone/SMS/CAPTCHA or additional Google security verification by default. Those steps must be completed by an operator. The `.env` file includes SMS provider placeholders for future compliant internal integrations, but the distributed script does not automate bypassing Google phone verification.
+By default the script stops at phone/SMS/CAPTCHA or additional Google security verification, and those steps are completed by an operator.
+
+Optionally, `--auto-phone` (or `PHONE_VERIFICATION_MODE=auto`) completes Google's phone step through a configured SMS provider. For the post-registration second login, sms-man numbers that support multiple messages are preferred so the same number can receive another code. firefox.fun and hero-sms remain fallbacks. Use this only for accounts and numbers you are authorized to manage and in line with the relevant terms of service. CAPTCHA and unknown Google security prompts are left to the operator.
 
 ## Requirements
 
@@ -117,10 +119,44 @@ Set `ANDROID_DEVICE` in `.env` if the device id is not `127.0.0.1:5675`.
 
 ## Run
 
-Default run stops at phone verification:
+Default run now performs the local lifecycle first: switch to a healthy Clash node when configured, start/connect the BlueStacks instance, clear Google/Gmail/Play state, run the registration flow, then close the instance when the script exits.
+
+After registration, the script removes the newly created Android account, signs in again through Gmail and Google Play Services, and verifies that Android AccountManager contains the account. The second-login account is then left on the BlueStacks instance, so its Gmail login state survives an emulator stop and restart.
 
 ```powershell
 python .\gmail_register_local.py
+```
+
+Skip the second-login check for diagnosis:
+
+```powershell
+python .\gmail_register_local.py --no-second-login
+```
+
+Explicitly opt in to phone-based Google 2-Step Verification after second login:
+
+```powershell
+python .\gmail_register_local.py --auto-phone --enable-2fa
+```
+
+2FA is never enabled by default. If Android presents an unrecognized security page, passkey flow, or CAPTCHA, the script leaves the emulator open for manual completion.
+
+Use a non-default emulator port:
+
+```powershell
+python .\gmail_register_local.py --device 127.0.0.1:5735
+```
+
+Keep the emulator open after the run:
+
+```powershell
+python .\gmail_register_local.py --keep-emulator
+```
+
+Skip lifecycle work for debugging:
+
+```powershell
+python .\gmail_register_local.py --no-prepare-emulator --no-switch-node --keep-emulator
 ```
 
 Wait while you manually complete phone verification, then continue:
@@ -133,6 +169,19 @@ Resume after manual phone verification:
 
 ```powershell
 python .\gmail_register_local.py --resume-after-phone
+```
+
+Resume after manually completing an Android second-login or 2FA security prompt. The current Google Play Services screen is reused:
+
+```powershell
+python .\gmail_register_local.py --resume-security
+```
+
+Complete phone verification automatically via the firefox.fun SMS provider
+(hero-sms fallback). Requires `SMS_TOKEN` + `SMS_PROJECT_ID_GMAIL` in `.env`:
+
+```powershell
+python .\gmail_register_local.py --auto-phone
 ```
 
 To let the script click the final Privacy and Terms and Google services confirmation after explicit operator consent:
@@ -151,15 +200,35 @@ Important values:
 - `ANDROID_DEVICE`: default `127.0.0.1:5675`
 - `GMAIL_USERNAME_PREFIX`: optional username prefix
 - `ACCEPT_TERMS`: `1` only after explicit consent
+- `PHONE_VERIFICATION_MODE`: `manual` (default) or `auto` (see `--auto-phone`)
+- `SECOND_LOGIN_AFTER_SIGNUP`: `1` by default; set `0` to skip the Android second-login check
+- `ENABLE_2FA_AFTER_LOGIN`: `0` by default; set `1` only to explicitly enable phone-based 2FA
 
-SMS provider placeholders are modeled after `reg-factory/common/sms.py`:
+SMS provider values drive `--auto-phone` / `PHONE_VERIFICATION_MODE=auto`:
 
-- `SMS_TOKEN`
-- `SMS_PROJECT_ID_GMAIL`
-- `HERO_SMS_API_KEY`
-- `HERO_SMS_SERVICE_GMAIL`
+- `SMSMAN_TOKEN`, `SMSMAN_APP_ID_GMAIL` - sms-man, preferred for multi-message leases
+- `SMSMAN_COUNTRY_GMAIL` - comma-separated country IDs (e.g., `"155,100"` for France/UK); `0` = any
+- `SMSMAN_MAXPRICE_GMAIL`, `SMSMAN_BLACKLIST_GMAIL` - sms-man filters
+- `SMS_TOKEN`, `SMS_PROJECT_ID_GMAIL` - firefox.fun fallback
+- `SMS_COUNTRY_GMAIL` - comma-separated country codes (e.g., `"33,44"` for France/UK); empty = any
+- `SMS_MAXPRICE_GMAIL`, `SMS_COUNTRY_BLACKLIST_GMAIL` - firefox.fun filters
+- `HERO_SMS_API_KEY`, `HERO_SMS_SERVICE_GMAIL` - hero-sms fallback
 
-They are reserved for future compliant integrations and are not enabled by default.
+Provider priority: **firefox.fun** (if stock available and passes whitelist/blacklist) → **sms-man** (by configured country list) → **hero-sms** (fallback).
+
+Leave them empty to keep phone verification manual.
+
+**SMS country filtering**: Set `SMS_COUNTRY_GMAIL` (firefox.fun country codes) and/or `SMSMAN_COUNTRY_GMAIL` (sms-man country IDs) to prefer specific countries. Example:
+
+```powershell
+$env:SMS_COUNTRY_GMAIL = "33,44"        # firefox.fun: France (33), UK (44)
+$env:SMSMAN_COUNTRY_GMAIL = "155,100"   # sms-man: France (155), UK (100)
+python .\gmail_register_local.py --auto-phone
+```
+
+Note: Country filtering only works when the SMS provider has stock and the number passes Google's verification (some virtual number ranges may be rejected or not receive SMS codes).
+
+Pending account credentials and the retained SMS lease are stored in `.runstate/pending-account.json` so a manual security handoff can resume. Completed credentials are appended to `.runstate/completed-accounts.jsonl`. The Android login itself remains in the BlueStacks instance. The run-state directory is excluded from git and release packages; protect it as sensitive local data.
 
 ## Package Contents
 

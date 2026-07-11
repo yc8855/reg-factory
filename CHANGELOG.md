@@ -1,5 +1,34 @@
 ﻿# 更新日志
 
+## 2026-07-11 — Gmail Android 注册优化（reCAPTCHA 自动解 + SMS 国家筛选）
+
+**新增**
+- **`gmail_android/recaptcha_android.py` 视觉自动解 reCAPTCHA v2**：通过 ADB accessibility tree 定位 WebView 里的 reCAPTCHA 节点（`recaptcha-anchor` checkbox、`rc-imageselect` 挑战窗口），Appium 点击/截图，调用 `common/agent_captcha.py` 视觉投票识别图块。
+  - **WebView 节点等待**：`solve()` 入口加 12s 等待循环，解决"检测到 reCAPTCHA 文字但 accessibility tree 还没暴露节点"的时机问题（之前立即返回 `False`）。
+  - **挑战类型自适应**：点 checkbox 后若直接通过（绿勾）则返回 `True`；若弹图片挑战则循环识别提交，最多 `max_rounds` 轮（默认 8）。
+  - **二登默认启用**：`RECAPTCHA_AUTO_SOLVE=1` 时自动调用，失败仍回退人工。要求 `VISION_API_KEY` 已配置（否则 `usable()` 返回 `False`）。
+- **SMS 国家筛选**（`sms_provider.py` + `config.py`）：
+  - **firefox.fun 白名单**：新增 `SMS_COUNTRY_GMAIL`（逗号分隔国家码，如 `"33,44"` = 法国/英国），`_request_firefox_number` 循环传 `country=<code>` 向接码平台请求指定国家号码；空值保持原有"任意国家"行为。
+  - **sms-man 多国支持**：`SMSMAN_COUNTRY_GMAIL` 现支持逗号分隔（如 `"155,100"` = 法国 id=155、英国 id=100），`_request_smsman_number` 逐个国家 ID 尝试租号。
+  - **三 provider 级联**：`request_number()` 优先 firefox.fun（有库存且过黑名单/白名单）→ sms-man（按配置国家列表）→ hero-sms（兜底）。
+- **BlueStacks 自动化**（`bluestacks.py`）：实例启动、ADB 连接、Google 账户清理、Appium UiAutomator2 server 安装的统一封装，支持 `AUTO_PREPARE_EMULATOR=1` 时自动准备干净实例。
+- **Clash 节点切换**（`proxy_switch.py`）：mihomo/Clash API 封装，支持节点延迟探测、区域关键词过滤（`NODE_REGION_KEYWORDS`）、Google 连通性探测（`proxy_probe`），配合 `AUTO_SWITCH_NODE=1` 在注册前自动切可用节点。
+- **流程协调器**（`coordinator.py`）：封装 Appium session 初始化、模拟器准备、节点切换、SMS provider 配置检查的编排逻辑，供 `gmail_register_local.py` 调用。
+
+**改进**
+- **sms-man 优先多次接码号**：`prefer_multi=True` 时优先选 `can_receive_multiple_sms=True` 的号码（Gmail 二登可能再要一次验证码）。
+- **配置项补全**：`config.py` 新增 `AUTO_PREPARE_EMULATOR`、`AUTO_START_APPIUM`、`AUTO_SWITCH_NODE`、`AUTO_STOP_EMULATOR`、`KEEP_EMULATOR_ON_MANUAL_HANDOFF`、`BLUESTACKS_INSTANCE`、`BLUESTACKS_ADB_PORT`、`APPIUM_SYSTEM_PORT`、`SECOND_LOGIN_AFTER_SIGNUP`、`ENABLE_2FA_AFTER_LOGIN`、`RECAPTCHA_AUTO_SOLVE`、`RECAPTCHA_SOLVE_ROUNDS` 等，统一从 `.env` 读取。
+
+**测试**
+- 实测视觉 reCAPTCHA 解题：点 checkbox 直接过 ✅、3×3 图片挑战（"select all traffic lights"）✅；12s 等待修复后稳定检测到节点。
+- 实测 SMS 国家筛选：firefox.fun 法国/英国无库存时回退 sms-man，成功租到 `+447446302327`（英国，multi=True），Google 接受号码（未拒绝"used too many times"），但 sms-man 该号段 180s 内未收到 Google 短信（VoIP 虚拟号限制）。
+- 实测默认流程（`SMS_COUNTRY_GMAIL` 空）：firefox.fun 返回菲律宾 +63 号被黑名单过滤，sms-man 返回马来西亚 +60 号被 Google 拒绝（"used too many times"）。
+
+**说明**
+- reCAPTCHA 视觉解题需要 `VISION_API_KEY` + `VISION_MODEL`（推荐 `gpt-5.5` 或 `claude-opus-4`），每轮挑战约消耗 1 次视觉 API 调用（截图 + 题干）。
+- SMS 国家筛选仅在接码平台有库存且号段未被 Google 风控时有效；虚拟号段（如 sms-man 英国 `+4474xx`）可能收不到 Google 短信，建议测试后再大规模使用。
+- 新增模块（`bluestacks.py`、`proxy_switch.py`、`coordinator.py`、`recaptcha_android.py`）为 `gmail_android/` 独立实现，不影响现有 Outlook/ChatGPT 注册流程。
+
 ## 2026-07-06 — AdsPower 指纹浏览器适配
 
 **新增**
