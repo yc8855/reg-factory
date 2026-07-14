@@ -85,15 +85,37 @@
 
 ## 0. 图形界面 / 一键安装（推荐新手）
 
-### Codex K12 独立控制台
+### Codex K12 控制台
 
-仓库现已包含 `codex_k12/` 子项目，用于管理授权 K12 workspace、Codex 凭据、邮箱池、Sub2API 入库和任务队列。主 WebUI 左侧提供 **Codex K12** 内嵌通道，并负责本地 K12 服务的启动与回收；K12 运行数据仍独立保存在 `codex_k12/data/`。
+`codex_k12/` 是 reg-factory 内置的 Codex/K12 运营控制台，用于统一管理已授权的 K12 workspace 任务、邮箱资产、Codex 凭据和下游账号。它采用 Vue + TypeScript 前端与本地 Node API，运行数据和主 Python 流程隔离，但可以直接复用仓库已有的 `emails.txt` 邮箱池。
 
-```powershell
+**主要能力**
+
+- 邮箱资产：批量导入、状态管理、手动/自动 OTP，以及从主仓库邮箱池增量同步。
+- K12 任务：按 workspace 编排任务，支持并发、队列、取消、重试、分页日志和结果追踪。
+- Codex / Sub2API：OAuth 或 noRT 入库、账号 JSON 写出、AT 测活与修复。
+- 运营管理：自动补号、失败任务清理、数据包导入导出和浏览器租户隔离。
+- 安全默认：只监听 `127.0.0.1`，不预置 workspace ID、代理或通用密码，配置接口不返回密钥原文。
+
+**与主项目的集成方式**
+
+```text
 start.bat
+  -> 主 WebUI http://127.0.0.1:8799/
+  -> 自动启动 Codex K12 http://127.0.0.1:8806/
+  -> 左侧“Codex K12”通道内嵌控制台
 ```
 
-主面板地址为 `http://127.0.0.1:8799/`，K12 也可在 `http://127.0.0.1:8806/` 单独打开；`start_k12.bat` 可用于独立启动。详细配置和开发命令见 [`codex_k12/README.md`](codex_k12/README.md)。新安装不包含默认 workspace ID、代理或通用密码，请只填写你拥有或已获授权的资源。
+主 WebUI 会检测 K12 健康状态、按需启动本地服务，并在退出时回收由它创建的 K12 子进程。K12 运行数据仍独立保存在 `codex_k12/data/`，不会写入主面板的 Python 运行目录。
+
+**首次使用**
+
+1. 运行 `install.bat` / `install.sh`，安装 Python 依赖并构建 K12 前端。
+2. 运行 `start.bat` / `start.sh`，从主面板左侧进入“Codex K12”。
+3. 在 K12 设置中填写你有权使用的 Workspace ID 和网络出口；本机直连可填写 `direct`。
+4. 按需配置邮箱 API、Sub2API、输出格式和补号策略，再同步主仓库邮箱池。
+
+`start_k12.bat` 可用于独立启动。主仓库邮箱同步只读取 `emails.txt`，不会改写原文件；账号、任务、token 和 JSON 输出均位于已忽略的 K12 数据目录。完整配置、开发命令和目录说明见 [`codex_k12/README.md`](codex_k12/README.md)。
 
 不想敲命令行？用自带的 **Web 控制面板** + **一键安装脚本**：
 
