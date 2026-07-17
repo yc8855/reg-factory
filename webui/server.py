@@ -725,6 +725,7 @@ def api_status():
     return {
         "pid": os.getpid(),
         "version": WEBUI_VERSION,
+        "root": ROOT,
         "bitbrowser": _http_alive(bb),
         "browser_provider": provider_label,
         "clash": _http_alive(clash),

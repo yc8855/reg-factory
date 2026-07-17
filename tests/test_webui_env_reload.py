@@ -39,6 +39,7 @@ class WebUIEnvReloadTests(unittest.TestCase):
                             status = server.api_status()
         self.assertEqual(status["pid"], os.getpid())
         self.assertEqual(status["version"], server.WEBUI_VERSION)
+        self.assertEqual(status["root"], server.ROOT)
 
 
 

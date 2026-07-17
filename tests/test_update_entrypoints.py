@@ -11,6 +11,8 @@ class UpdateEntrypointTests(unittest.TestCase):
         self.assertIn("Assert-NoRunningTasks", script)
         self.assertIn("git -C $Root pull --ff-only", script)
         self.assertIn("uvicorn\\s+webui\\.server:app", script)
+        self.assertIn("ParentProcessId", script)
+        self.assertIn("belongs to another reg-factory installation", script)
         self.assertIn("Wait-ForUpdatedPanel", script)
 
     def test_unix_updater_checks_tasks_and_restarts_verified_webui(self):
@@ -25,8 +27,10 @@ class UpdateEntrypointTests(unittest.TestCase):
         shell = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
         self.assertIn('"update"', powershell)
         self.assertIn('REG_FACTORY_ACTION must be install, start, or update', powershell)
+        self.assertIn('running.root', powershell)
         self.assertIn("update)", shell)
         self.assertIn("Action must be install, start, or update", shell)
+        self.assertIn('get("root", "")', shell)
 
 
 if __name__ == "__main__":

@@ -75,16 +75,43 @@ function Stop-Panel {
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $panelPid"
     if ($null -eq $process) { return }
     $expectedPython = [System.IO.Path]::GetFullPath($VenvPython)
-    $actualPython = if ($process.ExecutablePath) {
-        [System.IO.Path]::GetFullPath($process.ExecutablePath)
-    } else { "" }
-    if ($actualPython -ne $expectedPython -or
-        $process.CommandLine -notmatch "uvicorn\s+webui\.server:app") {
-        throw "Port $Port is not owned by this reg-factory WebUI; refusing to stop PID $panelPid."
+    $chain = @()
+    $current = $process
+    for ($i = 0; $i -lt 8 -and $null -ne $current; $i++) {
+        $chain += $current
+        if ([int]$current.ParentProcessId -le 0) { break }
+        $current = Get-CimInstance Win32_Process -Filter "ProcessId = $($current.ParentProcessId)" -ErrorAction SilentlyContinue
     }
 
-    $stopPid = $panelPid
-    $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)" -ErrorAction SilentlyContinue
+    $owner = $null
+    $otherRoot = $null
+    foreach ($candidate in $chain) {
+        if (-not $candidate.ExecutablePath) { continue }
+        $candidatePath = [System.IO.Path]::GetFullPath($candidate.ExecutablePath)
+        if ($candidatePath -eq $expectedPython) {
+            $owner = $candidate
+            break
+        }
+        if ($candidatePath -match "(?i)\\\.venv\\Scripts\\python(?:w)?\.exe$") {
+            $venvDir = Split-Path (Split-Path $candidatePath -Parent) -Parent
+            $otherRoot = Split-Path $venvDir -Parent
+        }
+    }
+
+    if ($process.CommandLine -notmatch "uvicorn\s+webui\.server:app") {
+        throw "Port $Port is not a reg-factory WebUI; refusing to stop PID $panelPid."
+    }
+    if ($null -eq $owner) {
+        if ($otherRoot) {
+            throw "Port $Port belongs to another reg-factory installation: $otherRoot. Set REG_FACTORY_DIR to that path or stop it first."
+        }
+        throw "Port $Port is not owned by the reg-factory installation at $Root; refusing to stop PID $panelPid."
+    }
+
+    # A Windows venv launcher may own a base-Python child that holds the port.
+    # Stop the matching launcher tree, or its dedicated start.bat console when present.
+    $stopPid = [int]$owner.ProcessId
+    $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($owner.ParentProcessId)" -ErrorAction SilentlyContinue
     if ($null -ne $parent -and $parent.Name -eq "cmd.exe" -and
         $parent.CommandLine -match "start\.bat") {
         $stopPid = [int]$parent.ProcessId

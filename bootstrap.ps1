@@ -9,7 +9,15 @@ if ($Action -notin @("install", "start", "update")) {
 
 $InstallDir = $env:REG_FACTORY_DIR
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-    $InstallDir = Join-Path $HOME "reg-factory"
+    try {
+        $running = Invoke-RestMethod -Uri "http://127.0.0.1:8799/api/status" -TimeoutSec 3
+        if ($running.root -and (Test-Path $running.root)) {
+            $InstallDir = $running.root
+        }
+    } catch {}
+    if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+        $InstallDir = Join-Path $HOME "reg-factory"
+    }
 }
 $Repo = "https://github.com/tiantianGPU/reg-factory.git"
 $Archive = "https://github.com/tiantianGPU/reg-factory/archive/refs/heads/main.zip"
